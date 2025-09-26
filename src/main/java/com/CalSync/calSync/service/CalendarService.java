@@ -40,26 +40,37 @@ public class CalendarService {
         // Create a quick lookup map for the timetable
         Map<String, DaySchedule> timetableMap = timetable.stream()
                 .collect(Collectors.toMap(DaySchedule::getDayOrder, schedule -> schedule));
+        
+        // ** LOGGING FOR VERIFICATION **
+        logger.debug("Timetable Day Orders available for matching: {}", timetableMap.keySet());
+        int eventCount = 0;
 
         // Iterate through every day in the academic planner
         for (DayEvent dayEvent : academicPlanner) {
-            // Find the corresponding schedule for that day's order (e.g., "Day1", "Day2")
-            DaySchedule daySchedule = timetableMap.get(dayEvent.getDayOrder());
+            String plannerDayOrder = dayEvent.getDayOrder();
+            DaySchedule daySchedule = timetableMap.get(plannerDayOrder);
 
+            // ** LOGGING FOR VERIFICATION **
             if (daySchedule != null) {
+                logger.debug("Match found! Planner Day Order: '{}' matches Timetable Day Order.", plannerDayOrder);
                 // We have classes on this day, so create events for them
                 for (CourseSlot courseSlot : daySchedule.getClasses()) {
                     if (courseSlot.isClass()) {
                         try {
                             VEvent event = createEventForCourse(courseSlot, dayEvent.getDate());
                             calendar.getComponents().add(event);
+                            eventCount++;
                         } catch (Exception e) {
                             logger.error("Could not create event for course {} on date {}", courseSlot.getCourseCode(), dayEvent.getDate(), e);
                         }
                     }
                 }
+            } else if (plannerDayOrder != null && !plannerDayOrder.isEmpty() && !plannerDayOrder.equalsIgnoreCase("Holiday")) {
+                 // Log only if it's a day that should have classes but no match was found
+                logger.debug("No match for Planner Day Order: '{}'", plannerDayOrder);
             }
         }
+        logger.info("Total calendar events generated: {}", eventCount);
         return calendar.toString();
     }
 
@@ -101,3 +112,4 @@ public class CalendarService {
         }
     }
 }
+

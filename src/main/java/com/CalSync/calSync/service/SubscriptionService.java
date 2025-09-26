@@ -1,5 +1,7 @@
 package com.CalSync.calSync.service;
 
+import com.CalSync.calSync.dto.DayEvent;
+import com.CalSync.calSync.dto.DaySchedule;
 import com.CalSync.calSync.dto.SubscriptionRequest;
 import com.CalSync.calSync.model.User;
 import com.CalSync.calSync.repository.UserRepository;
@@ -8,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,14 +20,18 @@ public class SubscriptionService {
     private final UserRepository userRepository;
     private final AcademiaService academiaService;
     private final EncryptionService encryptionService;
+    private final ParsingService parsingService;
+    private final CalendarService calendarService;
     private static final Logger logger = LoggerFactory.getLogger(SubscriptionService.class);
 
     @Autowired
-    public SubscriptionService(UserRepository userRepository, AcademiaService academiaService, EncryptionService encryptionService) {
+    public SubscriptionService(UserRepository userRepository, AcademiaService academiaService, EncryptionService encryptionService, ParsingService parsingService, CalendarService calendarService) {
         this.userRepository = userRepository;
         this.academiaService = academiaService;
         this.encryptionService = encryptionService;
-        logger.info("SubscriptionService has been instantiated.");
+        this.parsingService = parsingService;
+        this.calendarService = calendarService;
+        logger.info("SubscriptionService has been instantiated with all dependencies.");
     }
 
     public String createSubscription(SubscriptionRequest request) {
@@ -50,25 +57,37 @@ public class SubscriptionService {
 
     public String generateCalendar(String token) {
         logger.info("SubscriptionService: generateCalendar called for token {}", token);
-        User user = userRepository.findBySubscriptionToken(token)
-                .orElseThrow(() -> new RuntimeException("Subscription token not found"));
+        try {
+            User user = userRepository.findBySubscriptionToken(token)
+                    .orElseThrow(() -> new RuntimeException("Subscription token not found or invalid."));
 
-        String decryptedPassword = encryptionService.decrypt(user.getPassword());
-        logger.debug("Password decrypted for user {}", user.getUsername());
+            // STEP 1: AUTHENTICATE
+            String decryptedPassword = encryptionService.decrypt(user.getPassword());
+            String sessionCookie = academiaService.loginAndGetCookie(user.getUsername(), decryptedPassword);
+            logger.info("Step 1/4: Authentication successful.");
 
-        String sessionCookie = academiaService.loginAndGetCookie(user.getUsername(), decryptedPassword);
-        logger.info("Successfully received session cookie from AcademiaService.");
+            // STEP 2: SCRAPE DATA
+            String timetableHtml = academiaService.fetchTimetable(sessionCookie);
+            String academicPlannerHtml = academiaService.fetchAcademicPlanner(sessionCookie);
+            logger.info("Step 2/4: Raw HTML data scraped successfully.");
 
-        String timetableHtml = academiaService.fetchTimetable(sessionCookie);
-        // --- THIS IS THE CORRECTED LINE ---
-        String academicPlannerHtml = academiaService.fetchAcademicPlanner(sessionCookie);
+            // STEP 3: PARSE DATA
+            List<DaySchedule> timetable = parsingService.parseTimetable(timetableHtml);
+            List<DayEvent> academicPlanner = parsingService.parseAcademicPlanner(academicPlannerHtml);
+            logger.info("Step 3/4: HTML parsed into structured objects.");
 
-        // We will add the parsing and iCal generation logic in the next steps
-        logger.info("Successfully fetched timetable and academic planner HTML.");
+            // STEP 4: GENERATE CALENDAR
+            String icsContent = calendarService.generateIcsContent(timetable, academicPlanner);
+            logger.info("Step 4/4: iCalendar (.ics) content generated successfully.");
 
-        String icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//CalSync//EN\nEND:VCALENDAR";
+            // Log a snippet of the generated calendar for verification
+            logger.info("Generated ICS Content (first 300 chars): {}", icsContent.substring(0, Math.min(icsContent.length(), 300)));
+            return icsContent;
 
-        return icsContent;
+        } catch (Exception e) {
+            logger.error("An unexpected error occurred in generateCalendar for token {}:", token, e);
+            throw new RuntimeException("Failed to generate calendar. See server logs for details.", e);
+        }
     }
 
     private String buildSubscriptionUrl(String token) {
@@ -76,3 +95,4 @@ public class SubscriptionService {
         return "http://localhost:8080/api/calendar/" + token;
     }
 }
+

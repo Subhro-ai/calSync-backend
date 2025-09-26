@@ -34,15 +34,24 @@ public class ParsingService {
         Document doc = Jsoup.parse(cleanHtml);
 
         String batchText = getTextFromTableRow(doc, "Batch:");
-        int batch = 1; // Default to batch 1
-        if (batchText != null && !batchText.trim().isEmpty()) {
-            try {
-                String batchNumberStr = batchText.trim().split("/")[1];
-                batch = Integer.parseInt(batchNumberStr);
-            } catch (Exception e) {
-                logger.error("Could not parse batch number from text: '{}'. Defaulting to batch 1.", batchText, e);
+        int batch;
+        try {
+            if (batchText == null || batchText.trim().isEmpty()) {
+                throw new IllegalStateException("Could not determine batch from the timetable page.");
             }
+            String batchNumberStr;
+            String[] batchParts = batchText.trim().split("/");
+            if (batchParts.length > 1) {
+                batchNumberStr = batchParts[1];
+            } else {
+                batchNumberStr = batchParts[0];
+            }
+            batch = Integer.parseInt(batchNumberStr.trim());
+        } catch (Exception e) {
+            logger.error("Could not parse batch number from text: '{}'. Defaulting to batch 1.", batchText, e);
+            batch = 1;
         }
+        logger.info("Successfully parsed batch as: {}", batch);
 
         Map<String, CourseInfo> slotMap = new HashMap<>();
         Elements allCells = doc.select(".course_tbl td");
@@ -115,21 +124,59 @@ public class ParsingService {
             return new ArrayList<>();
         }
 
+        List<String> months = new ArrayList<>();
+        Element headerRow = mainTable.selectFirst("tr");
+        if (headerRow == null) return new ArrayList<>();
+        
+        Elements ths = headerRow.select("th");
+        for (int i = 0; ; i++) {
+            int monthNameThIndex = i * 5 + 2;
+            if (monthNameThIndex >= ths.size()) break;
+            
+            Element monthTh = ths.get(monthNameThIndex);
+            if (monthTh == null) break;
+
+            Element strongElement = monthTh.selectFirst("strong");
+            if(strongElement == null) continue;
+
+            String monthName = strongElement.text().trim();
+            if (!monthName.isEmpty()) {
+                months.add(monthName);
+            } else {
+                break;
+            }
+        }
+        logger.debug("Discovered months in planner: {}", months);
+
         List<DayEvent> academicCalendar = new ArrayList<>();
         Elements dataRows = mainTable.select("tr:gt(0)");
 
         for (Element row : dataRows) {
-            // The academic planner has 5 columns per month. We just iterate all.
             Elements tds = row.select("td");
-            for (int i = 0; i + 3 < tds.size(); i += 5) {
-                String date = tds.get(i).text().trim();
-                if (date.isEmpty()) continue;
+            for (int monthIndex = 0; monthIndex < months.size(); monthIndex++) {
+                int offset = monthIndex * 5;
+                if (offset + 3 >= tds.size()) continue;
 
-                String day = tds.get(i + 1).text().trim();
-                String event = tds.get(i + 2).selectFirst("strong").text().trim();
-                String dayOrder = tds.get(i + 3).text().trim().replaceAll("\\s+", ""); // "Day 1" -> "Day1"
+                String dayOfMonth = tds.get(offset).text().trim();
+                if (dayOfMonth.isEmpty() || !dayOfMonth.matches("\\d+")) continue;
 
-                academicCalendar.add(new DayEvent(date, day, event, dayOrder));
+                String monthYear = months.get(monthIndex);
+                String monthName = monthYear.split(" ")[0].substring(0, 3);
+                
+                // ** FINAL FIX: Robust Year Parsing **
+                String yearPart = monthYear.split(" ")[1].replaceAll("[^\\d]", ""); // " '25" -> "25"
+                String year = (yearPart.length() == 2) ? "20" + yearPart : yearPart;
+
+                String fullDateStr = dayOfMonth + "-" + monthName + "-" + year;
+
+                String dayOfWeek = tds.get(offset + 1).text().trim();
+                String event = tds.get(offset + 2).selectFirst("strong").text().trim();
+                String dayOrder = tds.get(offset + 3).text().trim().replaceAll("\\s+", "");
+
+                if (dayOrder.matches("\\d+")) {
+                    dayOrder = "Day" + dayOrder;
+                }
+                academicCalendar.add(new DayEvent(fullDateStr, dayOfWeek, event, dayOrder));
             }
         }
         return academicCalendar;
@@ -158,3 +205,4 @@ public class ParsingService {
         }
     }
 }
+

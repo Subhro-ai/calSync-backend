@@ -1,4 +1,5 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/base.xml"/>
     <logger name="com.CalSync.calSync.service.AcademiaService" level="DEBUG"/>
+    <logger name="com.CalSync.calSync.service.CalendarService" level="DEBUG"/>
 </configuration>
