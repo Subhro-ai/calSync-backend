@@ -20,7 +20,10 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -28,8 +31,16 @@ import java.util.stream.Collectors;
 public class CalendarService {
 
     private static final Logger logger = LoggerFactory.getLogger(CalendarService.class);
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("hh:mm a");
+    // Create a flexible date formatter that can handle different date formats
+    private static final DateTimeFormatter DATE_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("[dd-MMM-yyyy][d-MMM-yyyy]") // Handles both single and double digit days
+            .toFormatter(Locale.ENGLISH);
+    
+    // Create a more flexible time formatter that can handle both single and double digit hours
+    private static final DateTimeFormatter TIME_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("[h:mm a][hh:mm a]") // Handles both single digit (h) and double digit (hh) hours
+            .toFormatter(Locale.ENGLISH); // Ensure English locale for AM/PM parsing
+    
     private static final ZoneId ZONE_ID = ZoneId.of("Asia/Kolkata");
 
     public String generateIcsContent(List<DaySchedule> timetable, List<DayEvent> academicPlanner) {
@@ -61,7 +72,9 @@ public class CalendarService {
                             calendar.getComponents().add(event);
                             eventCount++;
                         } catch (Exception e) {
-                            logger.error("Could not create event for course {} on date {}", courseSlot.getCourseCode(), dayEvent.getDate(), e);
+                            logger.error("Could not create event for course {} on date {}: {}", 
+                                courseSlot.getCourseCode(), dayEvent.getDate(), e.getMessage());
+                            logger.debug("Failed time string was: '{}'", courseSlot.getTime());
                         }
                     }
                 }
@@ -77,8 +90,13 @@ public class CalendarService {
     private VEvent createEventForCourse(CourseSlot course, String dateStr) {
         LocalDate date = LocalDate.parse(dateStr, DATE_FORMATTER);
         String[] timeParts = course.getTime().split(" - ");
-        LocalTime startTime = LocalTime.parse(timeParts[0], TIME_FORMATTER);
-        LocalTime endTime = LocalTime.parse(timeParts[1], TIME_FORMATTER);
+        
+        if (timeParts.length != 2) {
+            throw new IllegalArgumentException("Invalid time format: " + course.getTime());
+        }
+
+        LocalTime startTime = parseTimeWithFallback(timeParts[0].trim());
+        LocalTime endTime = parseTimeWithFallback(timeParts[1].trim());
 
         java.util.Calendar startCal = java.util.Calendar.getInstance();
         startCal.setTime(java.util.Date.from(date.atTime(startTime).atZone(ZONE_ID).toInstant()));
@@ -94,6 +112,67 @@ public class CalendarService {
         event.getProperties().add(new Uid(generateUid(uidContent)));
 
         return event;
+    }
+
+    private LocalTime parseTimeWithFallback(String timeStr) {
+        try {
+            // First try with the flexible formatter
+            return LocalTime.parse(timeStr, TIME_FORMATTER);
+        } catch (DateTimeParseException e) {
+            logger.debug("Primary time parsing failed for '{}', trying fallback methods", timeStr);
+            
+            // Fallback 1: Try with basic h:mm a pattern
+            try {
+                DateTimeFormatter fallback1 = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
+                return LocalTime.parse(timeStr, fallback1);
+            } catch (DateTimeParseException e1) {
+                // Fallback 2: Try with hh:mm a pattern
+                try {
+                    DateTimeFormatter fallback2 = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
+                    return LocalTime.parse(timeStr, fallback2);
+                } catch (DateTimeParseException e2) {
+                    // Fallback 3: Manual parsing as last resort
+                    return parseTimeManually(timeStr);
+                }
+            }
+        }
+    }
+
+    private LocalTime parseTimeManually(String timeStr) {
+        // Manual parsing for edge cases
+        String cleanTime = timeStr.trim().toUpperCase();
+        logger.debug("Attempting manual parsing for time: '{}'", cleanTime);
+        
+        boolean isPM = cleanTime.endsWith("PM");
+        boolean isAM = cleanTime.endsWith("AM");
+        
+        if (!isPM && !isAM) {
+            throw new IllegalArgumentException("Time string must contain AM or PM: " + timeStr);
+        }
+        
+        // Remove AM/PM and trim
+        String timeOnly = cleanTime.substring(0, cleanTime.length() - 2).trim();
+        
+        String[] parts = timeOnly.split(":");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Invalid time format: " + timeStr);
+        }
+        
+        try {
+            int hour = Integer.parseInt(parts[0]);
+            int minute = Integer.parseInt(parts[1]);
+            
+            // Convert to 24-hour format
+            if (isPM && hour != 12) {
+                hour += 12;
+            } else if (isAM && hour == 12) {
+                hour = 0;
+            }
+            
+            return LocalTime.of(hour, minute);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Could not parse time components from: " + timeStr, e);
+        }
     }
 
     private String generateUid(String content) {
@@ -112,4 +191,3 @@ public class CalendarService {
         }
     }
 }
-

@@ -117,7 +117,14 @@ public class ParsingService {
             logger.warn("Could not find the 'zmlvalue' div on the calendar page.");
             return new ArrayList<>();
         }
-        Document innerDoc = Jsoup.parse(zmlDiv.attr("zmlvalue"));
+
+        String zmlValue = zmlDiv.attr("zmlvalue");
+        if (zmlValue.isEmpty()) {
+            logger.warn("'zmlvalue' attribute is empty.");
+            return new ArrayList<>();
+        }
+
+        Document innerDoc = Jsoup.parse(zmlValue);
         Element mainTable = innerDoc.selectFirst("table[bgcolor='#FAFCFE']");
         if (mainTable == null) {
             logger.warn("Could not find the main calendar table inside 'zmlvalue'.");
@@ -137,7 +144,7 @@ public class ParsingService {
             if (monthTh == null) break;
 
             Element strongElement = monthTh.selectFirst("strong");
-            if(strongElement == null) continue;
+            if (strongElement == null) continue;
 
             String monthName = strongElement.text().trim();
             if (!monthName.isEmpty()) {
@@ -157,28 +164,45 @@ public class ParsingService {
                 int offset = monthIndex * 5;
                 if (offset + 3 >= tds.size()) continue;
 
-                String dayOfMonth = tds.get(offset).text().trim();
-                if (dayOfMonth.isEmpty() || !dayOfMonth.matches("\\d+")) continue;
+                String date = tds.get(offset).text().trim();
+                if (date.isEmpty() || !date.matches("\\d+")) continue;
 
-                String monthYear = months.get(monthIndex);
-                String monthName = monthYear.split(" ")[0].substring(0, 3);
+                String day = tds.get(offset + 1).text().trim();
                 
-                // ** FINAL FIX: Robust Year Parsing **
-                String yearPart = monthYear.split(" ")[1].replaceAll("[^\\d]", ""); // " '25" -> "25"
-                String year = (yearPart.length() == 2) ? "20" + yearPart : yearPart;
+                Element eventElement = tds.get(offset + 2).selectFirst("strong");
+                String event = (eventElement != null) ? eventElement.text().trim() : "";
+                
+                String dayOrder = tds.get(offset + 3).text().trim();
 
-                String fullDateStr = dayOfMonth + "-" + monthName + "-" + year;
-
-                String dayOfWeek = tds.get(offset + 1).text().trim();
-                String event = tds.get(offset + 2).selectFirst("strong").text().trim();
-                String dayOrder = tds.get(offset + 3).text().trim().replaceAll("\\s+", "");
-
+                // ** CRITICAL FIX: Convert numeric day orders to "Day" format **
                 if (dayOrder.matches("\\d+")) {
                     dayOrder = "Day" + dayOrder;
+                    logger.debug("Converted numeric day order to: {}", dayOrder);
                 }
-                academicCalendar.add(new DayEvent(fullDateStr, dayOfWeek, event, dayOrder));
+
+                // Create the full date string using the month name from header
+                String monthYear = months.get(monthIndex);
+                String monthName = monthYear.split(" ")[0];
+                
+                // Extract year from month header (handle formats like "September '25" or "September 2025")
+                String yearPart = monthYear.split(" ")[1].replaceAll("[^\\d]", "");
+                String year = (yearPart.length() == 2) ? "20" + yearPart : yearPart;
+                
+                // Create date in dd-MMM-yyyy format
+                String fullDate = String.format("%s-%s-%s", 
+                    date.length() == 1 ? "0" + date : date, 
+                    monthName.substring(0, 3), 
+                    year);
+
+                // Add all entries to match the reference implementation
+                academicCalendar.add(new DayEvent(fullDate, day, event, dayOrder));
+                if (dayOrder.startsWith("Day")) {
+                    logger.debug("Added calendar event: date={}, dayOrder={}", fullDate, dayOrder);
+                }
             }
         }
+        
+        logger.info("Parsed {} academic planner entries", academicCalendar.size());
         return academicCalendar;
     }
 
@@ -205,4 +229,3 @@ public class ParsingService {
         }
     }
 }
-

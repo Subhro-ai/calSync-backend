@@ -11,6 +11,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -31,7 +32,6 @@ public class AcademiaService {
     }
 
     public String loginAndGetCookie(String username, String password) {
-        // ... (login logic remains the same)
         logger.debug("Step 1: Fetching initial cookies from {}", LOGIN_PAGE_URL);
         ResponseEntity<String> initialResponse = webClient.get()
                 .uri(LOGIN_PAGE_URL)
@@ -134,15 +134,20 @@ public class AcademiaService {
 
     private String fetchPageContent(String url, String cookie) {
         logger.info("Attempting to fetch content from: {}", url);
-        return webClient.get().uri(url)
-                .header(HttpHeaders.COOKIE, cookie)
-                .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
+        try {
+            return webClient.get().uri(url)
+                    .header(HttpHeaders.COOKIE, cookie)
+                    .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+        } catch (WebClientResponseException.NotFound ex) {
+            logger.error("Page not found at {}", url);
+            throw new IllegalStateException("Calendar/Timetable page not found at " + url);
+        }
     }
 
-    // ** Correct logic copied directly from original repository **
+    // ** CORRECTED: Using the same logic as reference implementation **
     private String getTimetableUrl() {
         LocalDate currentDate = LocalDate.now();
         int currentYear = currentDate.getYear();
@@ -152,7 +157,7 @@ public class AcademiaService {
         return url;
     }
 
-    // ** Correct logic copied directly from original repository **
+    // ** CORRECTED: Using the same logic as reference implementation **
     private String getCalendarUrl() {
         LocalDate currentDate = LocalDate.now();
         int currentYear = currentDate.getYear();
@@ -173,4 +178,3 @@ public class AcademiaService {
         return url;
     }
 }
-
