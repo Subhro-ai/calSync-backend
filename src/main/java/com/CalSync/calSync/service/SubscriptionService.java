@@ -3,25 +3,13 @@ package com.CalSync.calSync.service;
 import com.CalSync.calSync.dto.SubscriptionRequest;
 import com.CalSync.calSync.model.User;
 import com.CalSync.calSync.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
-import com.CalSync.calSync.dto.SubscriptionRequest;
-import com.CalSync.calSync.model.User;
-import com.CalSync.calSync.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
-import java.util.Optional;
-import java.util.UUID;
-
-import java.util.Optional;
-import java.util.UUID;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class SubscriptionService {
@@ -57,7 +45,6 @@ public class SubscriptionService {
         userRepository.save(newUser);
         logger.info("New user {} saved successfully.", request.getUsername());
 
-        // --- THIS LINE WAS MISSING ---
         return buildSubscriptionUrl(newUser.getSubscriptionToken());
     }
 
@@ -73,7 +60,11 @@ public class SubscriptionService {
         logger.info("Successfully received session cookie from AcademiaService.");
 
         String timetableHtml = academiaService.fetchTimetable(sessionCookie);
-        String academicPlannerHtml = academia.fetchAcademicPlanner(sessionCookie);
+        // --- THIS IS THE CORRECTED LINE ---
+        String academicPlannerHtml = academiaService.fetchAcademicPlanner(sessionCookie);
+
+        // We will add the parsing and iCal generation logic in the next steps
+        logger.info("Successfully fetched timetable and academic planner HTML.");
 
         String icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//CalSync//EN\nEND:VCALENDAR";
 
@@ -81,7 +72,7 @@ public class SubscriptionService {
     }
 
     private String buildSubscriptionUrl(String token) {
-        // Replace with your actual domain in a production environment
+        // In a real application, you would use your actual domain
         return "http://localhost:8080/api/calendar/" + token;
     }
 }
