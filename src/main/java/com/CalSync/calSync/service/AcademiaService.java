@@ -1,8 +1,8 @@
 package com.CalSync.calSync.service;
 
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import com.CalSync.calSync.dto.UserLookupResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -11,14 +11,13 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Service
 public class AcademiaService {
@@ -31,8 +30,9 @@ public class AcademiaService {
         this.webClient = webClientBuilder.build();
     }
 
+    // --- Authentication logic remains the same ---
     public String loginAndGetCookie(String username, String password) {
-        // Step 1: Fetch initial cookies and CSRF token
+        // ... (existing login logic)
         logger.debug("Step 1: Fetching initial cookies from {}", LOGIN_PAGE_URL);
         ResponseEntity<String> initialResponse = webClient.get()
                 .uri(LOGIN_PAGE_URL)
@@ -125,14 +125,72 @@ public class AcademiaService {
         throw new IllegalStateException("Login failed: Could not retrieve final authentication cookies.");
     }
 
-    // --- Placeholder Methods for Data Scraping ---
+    // --- NEW: Implemented Data Scraping Methods ---
+
     public String fetchTimetable(String cookie) {
-        // TODO: Implement the logic to scrape the "My Time Table" page
-        return "<html><body>Timetable HTML</body></html>";
+        String timetableUrl = getTimetableUrl();
+        logger.info("Fetching timetable from: {}", timetableUrl);
+
+        String rawHtml = webClient.get()
+                .uri(timetableUrl)
+                .header(HttpHeaders.COOKIE, cookie)
+                .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        if (rawHtml == null) {
+            throw new IllegalStateException("Did not receive a response from the timetable page.");
+        }
+        return rawHtml;
     }
 
     public String fetchAcademicPlanner(String cookie) {
-        // TODO: Implement the logic to scrape the "Academic Planner" page
-        return "<html><body>Academic Planner HTML</body></html>";
+        String calendarUrl = getCalendarUrl();
+        logger.info("Fetching academic planner from: {}", calendarUrl);
+
+        try {
+            String rawHtml = webClient.get().uri(calendarUrl)
+                    .header(HttpHeaders.COOKIE, cookie)
+                    .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (rawHtml == null) {
+                throw new IllegalStateException("Did not receive a response from the calendar page: " + calendarUrl);
+            }
+            return rawHtml;
+        } catch (WebClientResponseException.NotFound ex) {
+            logger.error("Academic Planner page not found at {}. This can happen between semesters.", calendarUrl);
+            // Return an empty HTML structure so the parsing doesn't fail
+            return "<html><body></body></html>";
+        }
+    }
+
+    private String getTimetableUrl() {
+        LocalDate currentDate = LocalDate.now();
+        int currentYear = currentDate.getYear();
+        // This logic might need adjustment based on when the academic year flips
+        String academicYear = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2);
+        return "https://academia.srmist.edu.in/srm_university/academia-academic-services/page/My_Time_Table_" + academicYear;
+    }
+
+    private String getCalendarUrl() {
+        LocalDate currentDate = LocalDate.now();
+        int currentYear = currentDate.getYear();
+        int month = currentDate.getMonthValue();
+        String academicYearString;
+        String semesterType;
+
+        if (month >= 7 && month <= 12) { // ODD semester (e.g., Jul - Dec)
+            semesterType = "ODD";
+            academicYearString = currentYear + "_" + String.valueOf(currentYear + 1).substring(2);
+        } else { // EVEN semester (e.g., Jan - Jun)
+            semesterType = "EVEN";
+            academicYearString = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2);
+        }
+
+        return "https://academia.srmist.edu.in/srm_university/academia-academic-services/page/Academic_Planner_" + academicYearString + "_" + semesterType;
     }
 }
