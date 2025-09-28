@@ -36,11 +36,15 @@ public class SubscriptionService {
 
     public String createSubscription(SubscriptionRequest request) {
         logger.info("SubscriptionService: createSubscription called for {}", request.getUsername());
-        Optional<User> existingUser = userRepository.findByUsername(request.getUsername());
+        Optional<User> existingUserOpt = userRepository.findByUsername(request.getUsername());
 
-        if (existingUser.isPresent()) {
-            logger.info("User {} already exists. Returning existing token.", request.getUsername());
-            return buildSubscriptionUrl(existingUser.get().getSubscriptionToken());
+        if (existingUserOpt.isPresent()) {
+            // ** NEW LOGIC: Update password if user already exists **
+            logger.info("User {} already exists. Updating password and returning existing token.", request.getUsername());
+            User existingUser = existingUserOpt.get();
+            existingUser.setPassword(encryptionService.encrypt(request.getPassword()));
+            userRepository.save(existingUser);
+            return buildSubscriptionUrl(existingUser.getSubscriptionToken());
         }
 
         logger.info("Creating new user for {}", request.getUsername());
@@ -75,6 +79,13 @@ public class SubscriptionService {
             List<DaySchedule> timetable = parsingService.parseTimetable(timetableHtml);
             List<DayEvent> academicPlanner = parsingService.parseAcademicPlanner(academicPlannerHtml);
             logger.info("Step 3/4: HTML parsed into structured objects.");
+            
+            // Log a snippet of the parsed planner data for verification
+            if (academicPlanner.isEmpty()) {
+                logger.warn("Academic planner parsing resulted in an empty list.");
+            } else {
+                logger.info("Parsed the first 5 days of the academic planner: {}", academicPlanner.subList(0, Math.min(5, academicPlanner.size())));
+            }
 
             // STEP 4: GENERATE CALENDAR
             String icsContent = calendarService.generateIcsContent(timetable, academicPlanner);
