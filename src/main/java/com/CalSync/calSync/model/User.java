@@ -8,7 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Data;
 
-@Data
+@Data // This single annotation handles all getters, setters, etc.
 @Entity
 @Table(name = "users")
 public class User {
@@ -25,4 +25,5 @@ public class User {
 
     @Column(unique = true, nullable = false)
     private String subscriptionToken;
+
 }
