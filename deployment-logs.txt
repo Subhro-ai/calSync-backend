@@ -1,4 +1,0 @@
-Retrieving logs...
-Logs were saved to /Users/subhrajyotisingha/Projects/calSync-backend/.elasticbeanstalk/logs/250929_215001
-Logs were saved to /Users/subhrajyotisingha/Projects/calSync-backend/.elasticbeanstalk/logs/250929_215001
-Updated symlink at /Users/subhrajyotisingha/Projects/calSync-backend/.elasticbeanstalk/logs/latest
