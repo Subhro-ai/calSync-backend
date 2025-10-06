@@ -5,10 +5,12 @@ import com.CalSync.calSync.dto.DaySchedule;
 import com.CalSync.calSync.dto.SubscriptionRequest;
 import com.CalSync.calSync.model.User;
 import com.CalSync.calSync.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,17 +36,23 @@ public class SubscriptionService {
         logger.info("SubscriptionService has been instantiated with all dependencies.");
     }
 
-    public String createSubscription(SubscriptionRequest request) {
+    public String createSubscription(SubscriptionRequest request, HttpServletRequest httpRequest) {
         logger.info("SubscriptionService: createSubscription called for {}", request.getUsername());
+
+        // STEP 1: Validate credentials BEFORE doing anything else.
+        // This will throw InvalidCredentialsException if login fails.
+        academiaService.loginAndGetCookie(request.getUsername(), request.getPassword());
+        logger.info("Credentials for {} are valid.", request.getUsername());
+
+        // STEP 2: Now that credentials are valid, find or create the user.
         Optional<User> existingUserOpt = userRepository.findByUsername(request.getUsername());
 
         if (existingUserOpt.isPresent()) {
-            // ** NEW LOGIC: Update password if user already exists **
             logger.info("User {} already exists. Updating password and returning existing token.", request.getUsername());
             User existingUser = existingUserOpt.get();
             existingUser.setPassword(encryptionService.encrypt(request.getPassword()));
             userRepository.save(existingUser);
-            return buildSubscriptionUrl(existingUser.getSubscriptionToken());
+            return buildSubscriptionUrl(existingUser.getSubscriptionToken(), httpRequest);
         }
 
         logger.info("Creating new user for {}", request.getUsername());
@@ -56,7 +64,7 @@ public class SubscriptionService {
         userRepository.save(newUser);
         logger.info("New user {} saved successfully.", request.getUsername());
 
-        return buildSubscriptionUrl(newUser.getSubscriptionToken());
+        return buildSubscriptionUrl(newUser.getSubscriptionToken(), httpRequest);
     }
 
     public String generateCalendar(String token) {
@@ -80,7 +88,6 @@ public class SubscriptionService {
             List<DayEvent> academicPlanner = parsingService.parseAcademicPlanner(academicPlannerHtml);
             logger.info("Step 3/4: HTML parsed into structured objects.");
             
-            // Log a snippet of the parsed planner data for verification
             if (academicPlanner.isEmpty()) {
                 logger.warn("Academic planner parsing resulted in an empty list.");
             } else {
@@ -91,7 +98,6 @@ public class SubscriptionService {
             String icsContent = calendarService.generateIcsContent(timetable, academicPlanner);
             logger.info("Step 4/4: iCalendar (.ics) content generated successfully.");
 
-            // Log a snippet of the generated calendar for verification
             logger.info("Generated ICS Content (first 300 chars): {}", icsContent.substring(0, Math.min(icsContent.length(), 300)));
             return icsContent;
 
@@ -101,9 +107,12 @@ public class SubscriptionService {
         }
     }
 
-    private String buildSubscriptionUrl(String token) {
-        // In a real application, you would use your actual domain
-        return "http://localhost:8080/api/calendar/" + token;
+    private String buildSubscriptionUrl(String token, HttpServletRequest request) {
+        // Build the URL dynamically without the .ics extension
+        return ServletUriComponentsBuilder.fromRequestUri(request)
+                .replacePath("/api/calendar/" + token)
+                .build()
+                .toUriString();
     }
 }
 

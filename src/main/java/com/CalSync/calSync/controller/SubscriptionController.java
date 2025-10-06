@@ -1,7 +1,11 @@
 package com.CalSync.calSync.controller;
 
 import com.CalSync.calSync.dto.SubscriptionRequest;
+import com.CalSync.calSync.service.InvalidCredentialsException;
 import com.CalSync.calSync.service.SubscriptionService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -9,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -16,6 +21,8 @@ import java.util.Map;
 public class SubscriptionController {
 
     private final SubscriptionService subscriptionService;
+    // Add the logger declaration
+    private static final Logger logger = LoggerFactory.getLogger(SubscriptionController.class);
 
     @Autowired
     public SubscriptionController(SubscriptionService subscriptionService) {
@@ -25,11 +32,13 @@ public class SubscriptionController {
     /**
      * Endpoint to create a new calendar subscription.
      * @param request The request body containing the user's username and password.
+     * @param httpRequest The incoming HTTP request, used to determine the base URL.
      * @return A JSON object containing the unique subscription URL.
      */
     @PostMapping("/subscribe")
-    public ResponseEntity<Map<String, String>> subscribe(@RequestBody SubscriptionRequest request) {
-        String subscriptionUrl = subscriptionService.createSubscription(request);
+    public ResponseEntity<Map<String, String>> subscribe(@RequestBody SubscriptionRequest request, HttpServletRequest httpRequest) {
+        // Pass the httpRequest to the service
+        String subscriptionUrl = subscriptionService.createSubscription(request, httpRequest);
         Map<String, String> response = Map.of("subscriptionUrl", subscriptionUrl);
         return ResponseEntity.ok(response);
     }
@@ -45,12 +54,23 @@ public class SubscriptionController {
         try {
             String icsContent = subscriptionService.generateCalendar(token);
             HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.valueOf("text/calendar"));
-            headers.setContentDispositionFormData("attachment", "calendar.ics");
+
+            // Set more explicit headers for better compatibility
+            MediaType mediaType = new MediaType("text", "calendar", StandardCharsets.UTF_8);
+            headers.setContentType(mediaType);
+            headers.setContentDispositionFormData("attachment", "calsync.ics");
+
             return new ResponseEntity<>(icsContent, headers, HttpStatus.OK);
         } catch (RuntimeException e) {
-            // Handle cases like an invalid token
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
         }
     }
+    
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidCredentials(InvalidCredentialsException ex) {
+        logger.error("Authentication failed: {}", ex.getMessage());
+        Map<String, String> response = Map.of("error", "Invalid Credentials", "message", "Login failed. Please check your username and password.");
+        return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+    }
 }
+
