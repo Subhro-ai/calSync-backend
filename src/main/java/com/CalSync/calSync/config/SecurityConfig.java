@@ -33,7 +33,7 @@ public class SecurityConfig {
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         // IMPORTANT: Add your deployed frontend URL here when you have it
-        configuration.setAllowedOrigins(List.of("http://localhost:4200"));
+        configuration.setAllowedOrigins(List.of("https://calsync-yhi1.onrender.com"));
         configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         

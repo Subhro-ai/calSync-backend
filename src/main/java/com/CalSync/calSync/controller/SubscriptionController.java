@@ -49,22 +49,24 @@ public class SubscriptionController {
      * @param token The unique subscription token.
      * @return The .ics file content with the appropriate headers.
      */
-    @GetMapping("/calendar/{token}")
-    public ResponseEntity<String> getCalendar(@PathVariable String token) {
-        try {
-            String icsContent = subscriptionService.generateCalendar(token);
-            HttpHeaders headers = new HttpHeaders();
+@GetMapping("/calendar/{token}")
+public ResponseEntity<String> getCalendar(@PathVariable String token) {
+    try {
+        String icsContent = subscriptionService.generateCalendar(token);
+        HttpHeaders headers = new HttpHeaders();
 
-            // Set more explicit headers for better compatibility
-            MediaType mediaType = new MediaType("text", "calendar", StandardCharsets.UTF_8);
-            headers.setContentType(mediaType);
-            headers.setContentDispositionFormData("attachment", "calsync.ics");
+        // Set proper media type
+        MediaType mediaType = new MediaType("text", "calendar", StandardCharsets.UTF_8);
+        headers.setContentType(mediaType);
 
-            return new ResponseEntity<>(icsContent, headers, HttpStatus.OK);
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
-        }
+        // Use inline disposition, not form-data
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"calsync.ics\"");
+
+        return new ResponseEntity<>(icsContent, headers, HttpStatus.OK);
+    } catch (RuntimeException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
     }
+}
     
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<Map<String, String>> handleInvalidCredentials(InvalidCredentialsException ex) {

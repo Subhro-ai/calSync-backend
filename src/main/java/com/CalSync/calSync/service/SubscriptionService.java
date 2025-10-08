@@ -68,7 +68,7 @@ public class SubscriptionService {
     }
 
     public String generateCalendar(String token) {
-        logger.info("SubscriptionService: generateCalendar called for token {}", token);
+        // logger.info("SubscriptionService: generateCalendar called for token {}", token);
         try {
             User user = userRepository.findBySubscriptionToken(token)
                     .orElseThrow(() -> new RuntimeException("Subscription token not found or invalid."));
@@ -76,17 +76,17 @@ public class SubscriptionService {
             // STEP 1: AUTHENTICATE
             String decryptedPassword = encryptionService.decrypt(user.getPassword());
             String sessionCookie = academiaService.loginAndGetCookie(user.getUsername(), decryptedPassword);
-            logger.info("Step 1/4: Authentication successful.");
+            // logger.info("Step 1/4: Authentication successful.");
 
             // STEP 2: SCRAPE DATA
             String timetableHtml = academiaService.fetchTimetable(sessionCookie);
             String academicPlannerHtml = academiaService.fetchAcademicPlanner(sessionCookie);
-            logger.info("Step 2/4: Raw HTML data scraped successfully.");
+            // logger.info("Step 2/4: Raw HTML data scraped successfully.");
 
             // STEP 3: PARSE DATA
             List<DaySchedule> timetable = parsingService.parseTimetable(timetableHtml);
             List<DayEvent> academicPlanner = parsingService.parseAcademicPlanner(academicPlannerHtml);
-            logger.info("Step 3/4: HTML parsed into structured objects.");
+            // logger.info("Step 3/4: HTML parsed into structured objects.");
             
             if (academicPlanner.isEmpty()) {
                 logger.warn("Academic planner parsing resulted in an empty list.");
@@ -98,7 +98,7 @@ public class SubscriptionService {
             String icsContent = calendarService.generateIcsContent(timetable, academicPlanner);
             logger.info("Step 4/4: iCalendar (.ics) content generated successfully.");
 
-            logger.info("Generated ICS Content (first 300 chars): {}", icsContent.substring(0, Math.min(icsContent.length(), 300)));
+            // logger.info("Generated ICS Content (first 300 chars): {}", icsContent.substring(0, Math.min(icsContent.length(), 300)));
             return icsContent;
 
         } catch (Exception e) {

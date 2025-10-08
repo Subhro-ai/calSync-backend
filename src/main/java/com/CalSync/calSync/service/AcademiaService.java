@@ -1,9 +1,11 @@
 package com.CalSync.calSync.service;
 
 import com.CalSync.calSync.dto.UserLookupResponse;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -54,7 +56,7 @@ public class AcademiaService {
 
         if (lookupData == null || lookupData.getIdentifier() == null) {
             logger.error("User lookup failed. Response: {}", lookupResponse);
-            throw new IllegalStateException("User lookup failed. Check username or see logs for details.");
+            throw new InvalidCredentialsException("User lookup failed. Invalid username.");
         }
         logger.debug("Successfully performed user lookup. Identifier: {}, Digest: {}", lookupData.getIdentifier(), lookupData.getDigest());
 
@@ -111,15 +113,42 @@ public class AcademiaService {
             .toEntity(String.class)
             .block();
 
-        if (responseEntity != null && responseEntity.getHeaders().containsKey(HttpHeaders.SET_COOKIE)) {
-            List<String> newCookies = responseEntity.getHeaders().get(HttpHeaders.SET_COOKIE);
-            String finalCookies = sessionCookies + "; " + String.join("; ", newCookies);
-            logger.debug("Login successful. Final cookies obtained.");
-            return finalCookies;
+        if (responseEntity == null) {
+            logger.error("Login failed! Response entity is null.");
+            throw new InvalidCredentialsException("Login failed: No response from authentication server.");
         }
 
-        logger.error("Login failed! Could not retrieve final authentication cookies. Status: {}", responseEntity != null ? responseEntity.getStatusCode() : "N/A");
-        throw new IllegalStateException("Login failed: Could not retrieve final authentication cookies.");
+        HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
+        String responseBody = responseEntity.getBody();
+        
+        logger.debug("Login response status: {}", statusCode);
+        logger.debug("Login response body (first 200 chars): {}", 
+            responseBody != null && responseBody.length() > 200 ? responseBody.substring(0, 200) : responseBody);
+
+        // Check if the response body indicates an error
+        if (responseBody != null && (responseBody.contains("\"errors\"") || responseBody.contains("error"))) {
+            logger.error("Login failed! Response contains error. Body: {}", responseBody);
+            throw new InvalidCredentialsException("Invalid username or password.");
+        }
+
+        // If we got a 200 OK and no errors in the body, consider it successful
+        if (statusCode.is2xxSuccessful()) {
+            // Combine all cookies (initial session + any new ones from login)
+            StringBuilder finalCookies = new StringBuilder(sessionCookies);
+            
+            if (responseEntity.getHeaders().containsKey(HttpHeaders.SET_COOKIE)) {
+                List<String> newCookies = responseEntity.getHeaders().get(HttpHeaders.SET_COOKIE);
+                if (newCookies != null && !newCookies.isEmpty()) {
+                    finalCookies.append("; ").append(String.join("; ", newCookies));
+                }
+            }
+            
+            logger.debug("Login successful. Authentication completed.");
+            return finalCookies.toString();
+        }
+
+        logger.error("Login failed! Unexpected status code: {}", statusCode);
+        throw new InvalidCredentialsException("Login failed with status: " + statusCode);
     }
     
     public String fetchTimetable(String cookie) {
@@ -147,7 +176,6 @@ public class AcademiaService {
         }
     }
 
-    // ** CORRECTED: Using the same logic as reference implementation **
     private String getTimetableUrl() {
         LocalDate currentDate = LocalDate.now();
         int currentYear = currentDate.getYear();
@@ -157,7 +185,6 @@ public class AcademiaService {
         return url;
     }
 
-    // ** CORRECTED: Using the same logic as reference implementation **
     private String getCalendarUrl() {
         LocalDate currentDate = LocalDate.now();
         int currentYear = currentDate.getYear();
