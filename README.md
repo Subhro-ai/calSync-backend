@@ -14,7 +14,6 @@ The link works with all major calendar clients — **Google Calendar, Apple Cale
 * **Intelligent Schedule Merging** – Merges personal timetables with the college’s academic planner, automatically handling holidays and day orders.
 * **Secure Credential Handling** – Encrypts passwords using AES before storage (never saved in plain text).
 * **Cross-Platform Compatibility** – Fully compliant with [RFC 5545](https://datatracker.ietf.org/doc/html/rfc5545), works across Google, Apple, and Outlook.
-* **Production-Ready Deployment** – Hosted on **AWS Elastic Beanstalk** with a **PostgreSQL** database on **AWS RDS**.
 
 ---
 
