@@ -41,8 +41,21 @@ public class SubscriptionService {
 
         // STEP 1: Validate credentials BEFORE doing anything else.
         // This will throw InvalidCredentialsException if login fails.
-        academiaService.loginAndGetCookie(request.getUsername(), request.getPassword());
-        logger.info("Credentials for {} are valid.", request.getUsername());
+        // We also immediately log out after validation.
+        String validationCookie = null;
+        try {
+            validationCookie = academiaService.loginAndGetCookie(request.getUsername(), request.getPassword());
+            logger.info("Credentials for {} are valid.", request.getUsername());
+        } catch (Exception e) {
+            // Let the exception propagate to be handled by the controller
+            throw e;
+        } finally {
+            if (validationCookie != null) {
+                academiaService.logout(validationCookie);
+                logger.info("Session for credential validation successfully terminated.");
+            }
+        }
+
 
         // STEP 2: Now that credentials are valid, find or create the user.
         Optional<User> existingUserOpt = userRepository.findByUsername(request.getUsername());
@@ -69,13 +82,14 @@ public class SubscriptionService {
 
     public String generateCalendar(String token) {
         // logger.info("SubscriptionService: generateCalendar called for token {}", token);
+        String sessionCookie = null; // To store the cookie for the finally block
         try {
             User user = userRepository.findBySubscriptionToken(token)
                     .orElseThrow(() -> new RuntimeException("Subscription token not found or invalid."));
 
             // STEP 1: AUTHENTICATE
             String decryptedPassword = encryptionService.decrypt(user.getPassword());
-            String sessionCookie = academiaService.loginAndGetCookie(user.getUsername(), decryptedPassword);
+            sessionCookie = academiaService.loginAndGetCookie(user.getUsername(), decryptedPassword);
             // logger.info("Step 1/4: Authentication successful.");
 
             // STEP 2: SCRAPE DATA
@@ -104,6 +118,12 @@ public class SubscriptionService {
         } catch (Exception e) {
             logger.error("An unexpected error occurred in generateCalendar for token {}:", token, e);
             throw new RuntimeException("Failed to generate calendar. See server logs for details.", e);
+        } finally {
+            // STEP 5: LOGOUT
+            if (sessionCookie != null) {
+                logger.info("Attempting to log out session for token {}", token);
+                academiaService.logout(sessionCookie);
+            }
         }
     }
 
@@ -115,4 +135,3 @@ public class SubscriptionService {
                 .toUriString();
     }
 }
-

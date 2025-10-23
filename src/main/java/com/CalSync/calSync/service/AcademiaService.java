@@ -16,10 +16,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class AcademiaService {
@@ -29,15 +31,56 @@ public class AcademiaService {
     private static final String BASE_URL = "https://academia.srmist.edu.in";
     private static final String LOGIN_PAGE_URL = BASE_URL + "/accounts/p/10002227248/signin?hide_fp=true&servicename=ZohoCreator&service_language=en&css_url=/49910842/academia-academic-services/downloadPortalCustomCss/login&dcc=true&serviceurl=" + BASE_URL + "/portal/academia-academic-services/redirectFromLogin";
 
+    // *** MODIFICATION: Updated to a modern User-Agent (late 2025) ***
+    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
+
     public AcademiaService(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
+    }
+
+    /**
+     * A helper method to robustly combine old and new cookie strings.
+     * This ensures new cookie values overwrite old ones if the name is the same.
+     */
+    private String combineCookies(String existingCookies, List<String> newCookies) {
+        if (newCookies == null || newCookies.isEmpty()) {
+            return existingCookies;
+        }
+
+        Map<String, String> cookieMap = new LinkedHashMap<>();
+        
+        // 1. Parse existing cookies
+        if (existingCookies != null && !existingCookies.isEmpty()) {
+            for (String cookie : existingCookies.split("; ")) {
+                if (cookie.contains("=")) {
+                    String[] parts = cookie.split("=", 2);
+                    if(parts.length == 2) {
+                        cookieMap.put(parts[0].trim(), parts[1].trim());
+                    }
+                }
+            }
+        }
+        
+        // 2. Parse and add/overwrite with new cookies
+        for (String cookieStr : newCookies) {
+            // Get just the name=value part, ignore attributes like Path, HttpOnly
+            String[] parts = cookieStr.split(";")[0].split("=", 2); 
+            if (parts.length == 2) {
+                cookieMap.put(parts[0].trim(), parts[1].trim());
+            }
+        }
+        
+        // 3. Rebuild the cookie string
+        return cookieMap.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining("; "));
     }
 
     public String loginAndGetCookie(String username, String password) {
         logger.debug("Step 1: Fetching initial cookies from {}", LOGIN_PAGE_URL);
         ResponseEntity<String> initialResponse = webClient.get()
                 .uri(LOGIN_PAGE_URL)
-                .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
                 .retrieve()
                 .toEntity(String.class)
                 .block();
@@ -51,17 +94,29 @@ public class AcademiaService {
         logger.debug("Successfully obtained session cookies and CSRF token.");
 
         logger.debug("Step 2: Performing user lookup for username: {}", username);
-        UserLookupResponse lookupResponse = performUserLookup(username, sessionCookies, sessionCsrfToken);
-        UserLookupResponse.LookupData lookupData = lookupResponse.getLookupData();
-
-        if (lookupData == null || lookupData.getIdentifier() == null) {
-            logger.error("User lookup failed. Response: {}", lookupResponse);
+        ResponseEntity<UserLookupResponse> lookupResponseEntity = performUserLookup(username, sessionCookies, sessionCsrfToken);
+        
+        UserLookupResponse lookupResponse = lookupResponseEntity.getBody();
+        if (lookupResponse == null || lookupResponse.getLookupData() == null || lookupResponse.getLookupData().getIdentifier() == null) {
+            logger.error("User lookup failed. Response body: {}", lookupResponse);
             throw new InvalidCredentialsException("User lookup failed. Invalid username.");
         }
+        
+        String updatedCookies = combineCookies(sessionCookies, lookupResponseEntity.getHeaders().getOrEmpty(HttpHeaders.SET_COOKIE));
+        logger.debug("Cookies updated after user lookup.");
+
+        // *** CRITICAL FIX: Re-extract the CSRF token from the *updated* cookies ***
+        String updatedCsrfToken = extractCsrfToken(updatedCookies);
+        if (!updatedCsrfToken.equals(sessionCsrfToken)) {
+            logger.debug("CSRF token was refreshed during lookup.");
+        }
+
+        UserLookupResponse.LookupData lookupData = lookupResponse.getLookupData();
         logger.debug("Successfully performed user lookup. Identifier: {}, Digest: {}", lookupData.getIdentifier(), lookupData.getDigest());
 
         logger.debug("Step 3: Completing login for identifier: {}", lookupData.getIdentifier());
-        return completeLogin(password, lookupData, sessionCookies, sessionCsrfToken);
+        // *** MODIFICATION: Pass the *updated* cookies AND the *updated* CSRF token ***
+        return completeLogin(password, lookupData, updatedCookies, updatedCsrfToken);
     }
 
     private String extractCsrfToken(String cookies) {
@@ -73,7 +128,7 @@ public class AcademiaService {
         throw new IllegalStateException("Could not find the 'iamcsr' cookie in the response headers.");
     }
 
-    private UserLookupResponse performUserLookup(String username, String sessionCookies, String csrfToken) {
+    private ResponseEntity<UserLookupResponse> performUserLookup(String username, String sessionCookies, String csrfToken) {
         String lookupUrl = BASE_URL + "/accounts/p/40-10002227248/signin/v2/lookup/" + username;
 
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
@@ -87,11 +142,17 @@ public class AcademiaService {
                 .uri(lookupUrl)
                 .header(HttpHeaders.COOKIE, sessionCookies)
                 .header("x-zcsrf-token", "iamcsrcoo=" + csrfToken)
-                .header("Referer", LOGIN_PAGE_URL)
+                .header(HttpHeaders.REFERER, LOGIN_PAGE_URL)
+                .header(HttpHeaders.ORIGIN, BASE_URL)
+                .header(HttpHeaders.ACCEPT, "application/json, text/plain, */*")
+                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin")
                 .contentType(MediaType.valueOf("application/x-www-form-urlencoded"))
                 .body(BodyInserters.fromFormData(formData))
                 .retrieve()
-                .bodyToMono(UserLookupResponse.class)
+                .toEntity(UserLookupResponse.class)
                 .block();
     }
 
@@ -103,10 +164,15 @@ public class AcademiaService {
                 .path("/accounts/p/40-10002227248/signin/v2/primary/{identifier}/password")
                 .queryParam("digest", lookupData.getDigest())
                 .build(lookupData.getIdentifier()))
-            .header(HttpHeaders.COOKIE, sessionCookies)
-            .header("x-zcsrf-token", "iamcsrcoo=" + csrfToken)
-            .header("Referer", LOGIN_PAGE_URL)
-            .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+            .header(HttpHeaders.COOKIE, sessionCookies) 
+            .header("x-zcsrf-token", "iamcsrcoo=" + csrfToken) // *** Use the potentially refreshed token ***
+            .header(HttpHeaders.REFERER, LOGIN_PAGE_URL)
+            .header(HttpHeaders.ORIGIN, BASE_URL)
+            .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+            .header(HttpHeaders.ACCEPT, "application/json, text/plain, */*")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Site", "same-origin")
             .contentType(MediaType.APPLICATION_JSON)
             .bodyValue(Map.of("passwordauth", Map.of("password", password)))
             .retrieve()
@@ -125,26 +191,18 @@ public class AcademiaService {
         logger.debug("Login response body (first 200 chars): {}", 
             responseBody != null && responseBody.length() > 200 ? responseBody.substring(0, 200) : responseBody);
 
-        // Check if the response body indicates an error
-        if (responseBody != null && (responseBody.contains("\"errors\"") || responseBody.contains("error"))) {
+        if (responseBody != null && (responseBody.contains("\"errors\"") || responseBody.contains("error") || responseBody.contains("SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED"))) {
             logger.error("Login failed! Response contains error. Body: {}", responseBody);
+            if (responseBody.contains("SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED")) {
+                 logger.error("Login failed due to SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED. All anti-bot measures failed.");
+                 throw new InvalidCredentialsException("Login failed: Server security policy blocked the request (Non-Trusted Domain).");
+            }
             throw new InvalidCredentialsException("Invalid username or password.");
         }
 
-        // If we got a 200 OK and no errors in the body, consider it successful
         if (statusCode.is2xxSuccessful()) {
-            // Combine all cookies (initial session + any new ones from login)
-            StringBuilder finalCookies = new StringBuilder(sessionCookies);
-            
-            if (responseEntity.getHeaders().containsKey(HttpHeaders.SET_COOKIE)) {
-                List<String> newCookies = responseEntity.getHeaders().get(HttpHeaders.SET_COOKIE);
-                if (newCookies != null && !newCookies.isEmpty()) {
-                    finalCookies.append("; ").append(String.join("; ", newCookies));
-                }
-            }
-            
             logger.debug("Login successful. Authentication completed.");
-            return finalCookies.toString();
+            return combineCookies(sessionCookies, responseEntity.getHeaders().getOrEmpty(HttpHeaders.SET_COOKIE));
         }
 
         logger.error("Login failed! Unexpected status code: {}", statusCode);
@@ -166,7 +224,11 @@ public class AcademiaService {
         try {
             return webClient.get().uri(url)
                     .header(HttpHeaders.COOKIE, cookie)
-                    .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+                    .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                    .header(HttpHeaders.REFERER, BASE_URL + "/portal/academia-academic-services") // Add Referer
+                    .header("Sec-Fetch-Dest", "document")
+                    .header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-Site", "same-origin")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -179,7 +241,14 @@ public class AcademiaService {
     private String getTimetableUrl() {
         LocalDate currentDate = LocalDate.now();
         int currentYear = currentDate.getYear();
-        String academicYear = (currentYear - 2) + "_" + String.valueOf(currentYear - 1).substring(2);
+        int month = currentDate.getMonthValue();
+        String academicYear;
+        if (month >= 1 && month <= 6) { // Jan - June (EVEN sem)
+            academicYear = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2); 
+        } else { // July - Dec (ODD sem)
+            academicYear = currentYear + "_" + String.valueOf(currentYear + 1).substring(2); 
+        }
+        
         String url = BASE_URL + "/srm_university/academia-academic-services/page/My_Time_Table_" + academicYear;
         logger.info("Generated Timetable URL: {}", url);
         return url;
@@ -187,21 +256,42 @@ public class AcademiaService {
 
     private String getCalendarUrl() {
         LocalDate currentDate = LocalDate.now();
-        int currentYear = currentDate.getYear();
-        int month = currentDate.getMonthValue();
+        int currentYear = currentDate.getYear(); 
+        int month = currentDate.getMonthValue(); 
         String academicYearString;
         String semesterType;
 
-        if (month >= 1 && month <= 6) {
+        if (month >= 1 && month <= 6) { 
             semesterType = "EVEN";
-            academicYearString = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2);
-        } else {
+            academicYearString = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2); 
+        } else { 
             semesterType = "ODD";
-            academicYearString = currentYear + "_" + String.valueOf(currentYear + 1).substring(2);
+            academicYearString = currentYear + "_" + String.valueOf(currentYear + 1).substring(2); 
         }
         
         String url = BASE_URL + "/srm_university/academia-academic-services/page/Academic_Planner_" + academicYearString + "_" + semesterType;
         logger.info("Generated Calendar URL: {}", url);
         return url;
+    }
+    
+    public void logout(String cookie) {
+        String logoutUrl = "https://academia.srmist.edu.in/accounts/p/10002227248/logout?servicename=ZohoCreator&serviceurl=https://academia.srmist.edu.in";
+        try {
+            ResponseEntity<Void> response = webClient.get()
+                .uri(logoutUrl)
+                .header(HttpHeaders.COOKIE, cookie)
+                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                .retrieve()
+                .toBodilessEntity()
+                .block();
+            
+            if (response != null && (response.getStatusCode().is2xxSuccessful() || response.getStatusCode().is3xxRedirection())) {
+                logger.info("Successfully initiated logout from Academia server. Status: " + response.getStatusCode());
+            } else {
+                logger.warn("Academia server returned an unexpected status for logout: " + (response != null ? response.getStatusCode() : "N/A"));
+            }
+        } catch (Exception e) {
+            logger.error("An error occurred while trying to log out from Academia server.", e);
+        }
     }
 }
