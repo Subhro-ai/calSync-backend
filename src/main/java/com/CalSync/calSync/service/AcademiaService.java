@@ -1,7 +1,6 @@
 package com.CalSync.calSync.service;
 
 import com.CalSync.calSync.dto.UserLookupResponse;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -31,17 +30,18 @@ public class AcademiaService {
     private static final String BASE_URL = "https://academia.srmist.edu.in";
     private static final String LOGIN_PAGE_URL = BASE_URL + "/accounts/p/10002227248/signin?hide_fp=true&servicename=ZohoCreator&service_language=en&css_url=/49910842/academia-academic-services/downloadPortalCustomCss/login&dcc=true&serviceurl=" + BASE_URL + "/portal/academia-academic-services/redirectFromLogin";
 
-    // *** MODIFICATION: Updated to a modern User-Agent (late 2025) ***
+    // Enhanced browser headers
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
+    private static final String ACCEPT_LANGUAGE = "en-US,en;q=0.9";
+    private static final String ACCEPT_ENCODING = "gzip, deflate, br, zstd";
+    private static final String SEC_CH_UA = "\"Google Chrome\";v=\"129\", \"Not=A?Brand\";v=\"8\", \"Chromium\";v=\"129\"";
+    private static final String SEC_CH_UA_MOBILE = "?0";
+    private static final String SEC_CH_UA_PLATFORM = "\"Windows\"";
 
     public AcademiaService(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
     }
 
-    /**
-     * A helper method to robustly combine old and new cookie strings.
-     * This ensures new cookie values overwrite old ones if the name is the same.
-     */
     private String combineCookies(String existingCookies, List<String> newCookies) {
         if (newCookies == null || newCookies.isEmpty()) {
             return existingCookies;
@@ -49,7 +49,6 @@ public class AcademiaService {
 
         Map<String, String> cookieMap = new LinkedHashMap<>();
         
-        // 1. Parse existing cookies
         if (existingCookies != null && !existingCookies.isEmpty()) {
             for (String cookie : existingCookies.split("; ")) {
                 if (cookie.contains("=")) {
@@ -61,16 +60,13 @@ public class AcademiaService {
             }
         }
         
-        // 2. Parse and add/overwrite with new cookies
         for (String cookieStr : newCookies) {
-            // Get just the name=value part, ignore attributes like Path, HttpOnly
             String[] parts = cookieStr.split(";")[0].split("=", 2); 
             if (parts.length == 2) {
                 cookieMap.put(parts[0].trim(), parts[1].trim());
             }
         }
         
-        // 3. Rebuild the cookie string
         return cookieMap.entrySet().stream()
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("; "));
@@ -78,9 +74,29 @@ public class AcademiaService {
 
     public String loginAndGetCookie(String username, String password) {
         logger.debug("Step 1: Fetching initial cookies from {}", LOGIN_PAGE_URL);
+        
+        // Add delay to appear more human-like
+        try {
+            Thread.sleep(500 + (long)(Math.random() * 500)); // 500-1000ms delay
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
         ResponseEntity<String> initialResponse = webClient.get()
                 .uri(LOGIN_PAGE_URL)
-                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                .header(HttpHeaders.USER_AGENT, USER_AGENT)
+                .header(HttpHeaders.ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+                .header(HttpHeaders.ACCEPT_LANGUAGE, ACCEPT_LANGUAGE)
+                .header(HttpHeaders.ACCEPT_ENCODING, ACCEPT_ENCODING)
+                .header("sec-ch-ua", SEC_CH_UA)
+                .header("sec-ch-ua-mobile", SEC_CH_UA_MOBILE)
+                .header("sec-ch-ua-platform", SEC_CH_UA_PLATFORM)
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none")
+                .header("Sec-Fetch-User", "?1")
+                .header("Upgrade-Insecure-Requests", "1")
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=0")
                 .retrieve()
                 .toEntity(String.class)
                 .block();
@@ -93,6 +109,13 @@ public class AcademiaService {
         String sessionCsrfToken = extractCsrfToken(sessionCookies);
         logger.debug("Successfully obtained session cookies and CSRF token.");
 
+        // Add another small delay
+        try {
+            Thread.sleep(300 + (long)(Math.random() * 300));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         logger.debug("Step 2: Performing user lookup for username: {}", username);
         ResponseEntity<UserLookupResponse> lookupResponseEntity = performUserLookup(username, sessionCookies, sessionCsrfToken);
         
@@ -103,19 +126,25 @@ public class AcademiaService {
         }
         
         String updatedCookies = combineCookies(sessionCookies, lookupResponseEntity.getHeaders().getOrEmpty(HttpHeaders.SET_COOKIE));
-        logger.debug("Cookies updated after user lookup.");
-
-        // *** CRITICAL FIX: Re-extract the CSRF token from the *updated* cookies ***
         String updatedCsrfToken = extractCsrfToken(updatedCookies);
+        
         if (!updatedCsrfToken.equals(sessionCsrfToken)) {
-            logger.debug("CSRF token was refreshed during lookup.");
+            logger.debug("CSRF token was refreshed during lookup. Old: {}, New: {}", 
+                sessionCsrfToken.substring(0, Math.min(10, sessionCsrfToken.length())), 
+                updatedCsrfToken.substring(0, Math.min(10, updatedCsrfToken.length())));
         }
 
         UserLookupResponse.LookupData lookupData = lookupResponse.getLookupData();
-        logger.debug("Successfully performed user lookup. Identifier: {}, Digest: {}", lookupData.getIdentifier(), lookupData.getDigest());
+        logger.debug("Successfully performed user lookup. Identifier: {}", lookupData.getIdentifier());
+
+        // Add delay before final login
+        try {
+            Thread.sleep(400 + (long)(Math.random() * 400));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         logger.debug("Step 3: Completing login for identifier: {}", lookupData.getIdentifier());
-        // *** MODIFICATION: Pass the *updated* cookies AND the *updated* CSRF token ***
         return completeLogin(password, lookupData, updatedCookies, updatedCsrfToken);
     }
 
@@ -145,7 +174,12 @@ public class AcademiaService {
                 .header(HttpHeaders.REFERER, LOGIN_PAGE_URL)
                 .header(HttpHeaders.ORIGIN, BASE_URL)
                 .header(HttpHeaders.ACCEPT, "application/json, text/plain, */*")
-                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                .header(HttpHeaders.ACCEPT_LANGUAGE, ACCEPT_LANGUAGE)
+                .header(HttpHeaders.ACCEPT_ENCODING, ACCEPT_ENCODING)
+                .header(HttpHeaders.USER_AGENT, USER_AGENT)
+                .header("sec-ch-ua", SEC_CH_UA)
+                .header("sec-ch-ua-mobile", SEC_CH_UA_MOBILE)
+                .header("sec-ch-ua-platform", SEC_CH_UA_PLATFORM)
                 .header("Sec-Fetch-Dest", "empty")
                 .header("Sec-Fetch-Mode", "cors")
                 .header("Sec-Fetch-Site", "same-origin")
@@ -165,11 +199,16 @@ public class AcademiaService {
                 .queryParam("digest", lookupData.getDigest())
                 .build(lookupData.getIdentifier()))
             .header(HttpHeaders.COOKIE, sessionCookies) 
-            .header("x-zcsrf-token", "iamcsrcoo=" + csrfToken) // *** Use the potentially refreshed token ***
+            .header("x-zcsrf-token", "iamcsrcoo=" + csrfToken)
             .header(HttpHeaders.REFERER, LOGIN_PAGE_URL)
             .header(HttpHeaders.ORIGIN, BASE_URL)
-            .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+            .header(HttpHeaders.USER_AGENT, USER_AGENT)
             .header(HttpHeaders.ACCEPT, "application/json, text/plain, */*")
+            .header(HttpHeaders.ACCEPT_LANGUAGE, ACCEPT_LANGUAGE)
+            .header(HttpHeaders.ACCEPT_ENCODING, ACCEPT_ENCODING)
+            .header("sec-ch-ua", SEC_CH_UA)
+            .header("sec-ch-ua-mobile", SEC_CH_UA_MOBILE)
+            .header("sec-ch-ua-platform", SEC_CH_UA_PLATFORM)
             .header("Sec-Fetch-Dest", "empty")
             .header("Sec-Fetch-Mode", "cors")
             .header("Sec-Fetch-Site", "same-origin")
@@ -194,8 +233,8 @@ public class AcademiaService {
         if (responseBody != null && (responseBody.contains("\"errors\"") || responseBody.contains("error") || responseBody.contains("SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED"))) {
             logger.error("Login failed! Response contains error. Body: {}", responseBody);
             if (responseBody.contains("SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED")) {
-                 logger.error("Login failed due to SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED. All anti-bot measures failed.");
-                 throw new InvalidCredentialsException("Login failed: Server security policy blocked the request (Non-Trusted Domain).");
+                 logger.error("Login failed due to SIGNIN_NON_TRUSTED_DOMAIN_BLOCKED.");
+                 throw new InvalidCredentialsException("Login blocked by server security. This may be due to automated access detection. Please try again later or contact support.");
             }
             throw new InvalidCredentialsException("Invalid username or password.");
         }
@@ -224,8 +263,14 @@ public class AcademiaService {
         try {
             return webClient.get().uri(url)
                     .header(HttpHeaders.COOKIE, cookie)
-                    .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
-                    .header(HttpHeaders.REFERER, BASE_URL + "/portal/academia-academic-services") // Add Referer
+                    .header(HttpHeaders.USER_AGENT, USER_AGENT)
+                    .header(HttpHeaders.ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header(HttpHeaders.ACCEPT_LANGUAGE, ACCEPT_LANGUAGE)
+                    .header(HttpHeaders.ACCEPT_ENCODING, ACCEPT_ENCODING)
+                    .header(HttpHeaders.REFERER, BASE_URL + "/portal/academia-academic-services")
+                    .header("sec-ch-ua", SEC_CH_UA)
+                    .header("sec-ch-ua-mobile", SEC_CH_UA_MOBILE)
+                    .header("sec-ch-ua-platform", SEC_CH_UA_PLATFORM)
                     .header("Sec-Fetch-Dest", "document")
                     .header("Sec-Fetch-Mode", "navigate")
                     .header("Sec-Fetch-Site", "same-origin")
@@ -243,13 +288,13 @@ public class AcademiaService {
         int currentYear = currentDate.getYear();
         int month = currentDate.getMonthValue();
         String academicYear;
-        if (month >= 1 && month <= 6) { // Jan - June (EVEN sem)
+        if (month >= 1 && month <= 6) {
             academicYear = (currentYear - 1) + "_" + String.valueOf(currentYear).substring(2); 
-        } else { // July - Dec (ODD sem)
+        } else {
             academicYear = currentYear + "_" + String.valueOf(currentYear + 1).substring(2); 
         }
         
-        String url = BASE_URL + "/srm_university/academia-academic-services/page/My_Time_Table_" + academicYear;
+        String url = BASE_URL + "/srm_university/academia-academic-services/page/My_Time_Table_2023_24";
         logger.info("Generated Timetable URL: {}", url);
         return url;
     }
@@ -280,7 +325,10 @@ public class AcademiaService {
             ResponseEntity<Void> response = webClient.get()
                 .uri(logoutUrl)
                 .header(HttpHeaders.COOKIE, cookie)
-                .header(HttpHeaders.USER_AGENT, USER_AGENT) // Use modern User-Agent
+                .header(HttpHeaders.USER_AGENT, USER_AGENT)
+                .header(HttpHeaders.ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header(HttpHeaders.ACCEPT_LANGUAGE, ACCEPT_LANGUAGE)
+                .header(HttpHeaders.REFERER, BASE_URL + "/portal/academia-academic-services")
                 .retrieve()
                 .toBodilessEntity()
                 .block();
