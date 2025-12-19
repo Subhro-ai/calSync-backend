@@ -153,7 +153,7 @@ public class AcademiaService {
         int currentYear = currentDate.getYear();
         String academicYear = (currentYear - 2) + "_" + String.valueOf(currentYear - 1).substring(2);
         // String url = BASE_URL + "/srm_university/academia-academic-services/page/My_Time_Table_" + academicYear;
-        String url = "https://academia.srmist.edu.in/#Page:Unified_Time_Table_2025_Batch_1";
+        String url ="https://academia.srmist.edu.in/srm_university/academia-academic-services/page/Unified_Time_Table_2025_Batch_1";
         logger.info("Generated Timetable URL: {}", url);
         return url;
     }
@@ -175,7 +175,7 @@ public class AcademiaService {
         }
         
         String url = BASE_URL + "/srm_university/academia-academic-services/page/Academic_Planner_" + academicYearString + "_" + semesterType;
-        url = "https://academia.srmist.edu.in/#Page:Academic_Planner_2025_26_EVEN";
+        url ="https://academia.srmist.edu.in/srm_university/academia-academic-services/page/Academic_Planner_2025_26_EVEN";
         logger.info("Generated Calendar URL: {}", url);
         return url;
     }
